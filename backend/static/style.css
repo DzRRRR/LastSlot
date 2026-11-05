@@ -122,6 +122,19 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 }
 .btn-secondary:hover { background: #f8f9fa; }
 .btn-secondary:disabled { opacity: 0.6; cursor: progress; }
+.btn-primary {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+.btn-primary:hover { filter: brightness(0.95); }
+.btn-primary:disabled { opacity: 0.6; cursor: progress; }
+.hint { margin: 0; color: var(--muted); font-size: 12px; }
+.form-error { margin: 0; color: var(--deal); font-size: 13px; }
 
 .results-header { padding: 10px 16px 6px; color: var(--muted); font-size: 13px; }
 
@@ -200,6 +213,63 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   font-weight: 600;
 }
 .btn-reserve:hover { filter: brightness(0.95); }
+
+/* ---------- Réservation (dialog) ---------- */
+.booking-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 22px 22px 18px;
+  border: 0;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(16, 24, 40, 0.3);
+  color: var(--text);
+}
+.booking-dialog::backdrop { background: rgba(29, 42, 68, 0.45); }
+.booking-dialog h2 { margin: 0 32px 14px 0; font-size: 20px; }
+.booking-dialog p { margin: 12px 0 0; }
+.dialog-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 26px;
+  line-height: 1;
+}
+.booking-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f8f9fa;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.booking-summary .dot { margin-top: 6px; }
+.booking-form { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.booking-form input { padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.booking-form .booking-price { margin: 0; }
+.booking-price { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; font-size: 15px; }
+.booking-price s { color: var(--muted); }
+.booking-price strong { font-size: 22px; }
+.hold-timer { font-size: 15px; }
+.countdown { color: var(--brand); font-size: 20px; font-variant-numeric: tabular-nums; }
+.booking-paid strong { color: var(--ok); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.booking-dialog .hint { margin-top: 12px; }
+.success-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: #e6fcf5;
+  color: var(--ok);
+  font-size: 26px;
+  font-weight: 700;
+}
 
 /* ---------- Toast ---------- */
 .toast {

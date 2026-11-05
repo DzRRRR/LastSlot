@@ -9,8 +9,8 @@ import pytest
 
 from app import api_public
 from app.broker import Broker
-from tests.dbutil import (EVENT_CATEGORY, db_call, delete_merchants, insert_merchant, insert_service,
-                          insert_slot, requires_db)
+from tests.dbutil import (EVENT_CATEGORY, db_call, delete_merchants, insert_booking, insert_merchant,
+                          insert_service, insert_slot, requires_db)
 
 
 class FakeRequest:
@@ -140,11 +140,7 @@ def test_sse_end_to_end_with_expired_hold(client: httpx.Client, released_slot: d
             assert time.monotonic() < deadline, "pas de heartbeat"
 
         # Hold déjà expiré : le job (toutes les 0,2 s) le libère et publie un événement.
-        db_call(lambda conn: conn.execute(
-            """INSERT INTO booking (slot_id, customer_name, customer_contact, seats, status, expires_at)
-               VALUES ($1, 'Client test', 'test@example.org', 2, 'held', now() - interval '1 second')""",
-            slot_id,
-        ))
+        db_call(lambda conn: insert_booking(conn, slot_id, "held", seats=2, expires_in_s=-1))
         event = wait_slot_event(lines, slot_id)
 
     assert event == {"id": slot_id, "merchant_id": released_slot["merchant"], "remaining": 3,

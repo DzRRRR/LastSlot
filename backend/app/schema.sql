@@ -1,4 +1,4 @@
--- Schéma du prototype Last Slot, version 2 (voir SCHEMA_VERSION dans db.py).
+-- Schéma du prototype Last Slot, version 3 (voir SCHEMA_VERSION dans db.py).
 -- Idempotent : exécuté à chaque démarrage de l'API. Pas de migrations pour le proto : en cas de
 -- changement de version, `python -m app.seed --reset` supprime et recrée les objets ci-dessous.
 -- PostgreSQL 16 + PostGIS 3.4.
@@ -90,10 +90,20 @@ CREATE TABLE IF NOT EXISTS booking (
     customer_name    text NOT NULL,
     customer_contact text NOT NULL,
     seats            int  NOT NULL DEFAULT 1 CHECK (seats > 0),
+    -- Prix figé à la prise de place : la remise progressive change ensuite le prix courant du
+    -- créneau, le client paie le prix qu'il a vu. Commission Last Slot calculée au même moment.
+    discount_pct     int  NOT NULL CHECK (discount_pct BETWEEN 0 AND 80),
+    unit_price_cents int  NOT NULL CHECK (unit_price_cents > 0),
+    amount_cents     int  NOT NULL,
+    commission_cents int  NOT NULL,
     status           text NOT NULL CHECK (status IN ('held', 'confirmed', 'expired', 'cancelled')),
     expires_at       timestamptz,
     created_at       timestamptz NOT NULL DEFAULT now(),
-    CHECK (status <> 'held' OR expires_at IS NOT NULL)
+    confirmed_at     timestamptz,
+    CHECK (amount_cents = unit_price_cents * seats),
+    CHECK (commission_cents BETWEEN 0 AND amount_cents),
+    CHECK (status <> 'held' OR expires_at IS NOT NULL),
+    CHECK ((status = 'confirmed') = (confirmed_at IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS booking_held_expiry_idx ON booking (expires_at) WHERE status = 'held';
 CREATE INDEX IF NOT EXISTS booking_slot_idx ON booking (slot_id);

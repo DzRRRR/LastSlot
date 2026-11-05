@@ -57,13 +57,20 @@ async def insert_resource(conn: asyncpg.Connection, merchant_id: int, name: str)
 
 async def insert_booking(conn: asyncpg.Connection, slot_id: int, status: str, *, seats: int = 1,
                          name: str = "Client test", contact: str = "client@example.org",
-                         expires_in_s: int = 300) -> None:
-    """Réservation brute (sans toucher à slot.remaining) ; expires_at n'est rempli que pour 'held'."""
+                         expires_in_s: int = 300, unit_price_cents: int = 2000,
+                         discount_pct: int = 20) -> None:
+    """Réservation brute (sans toucher à slot.remaining) ; expires_at n'est rempli que pour
+    'held' (négatif = délai déjà dépassé), confirmed_at que pour 'confirmed'."""
+    amount = unit_price_cents * seats
     await conn.execute(
-        """INSERT INTO booking (slot_id, customer_name, customer_contact, seats, status, expires_at)
-           VALUES ($1, $2, $3, $4, $5::text,
-                   CASE WHEN $5::text = 'held' THEN now() + make_interval(secs => $6::int) END)""",
-        slot_id, name, contact, seats, status, expires_in_s,
+        """INSERT INTO booking (slot_id, customer_name, customer_contact, seats, discount_pct,
+                                unit_price_cents, amount_cents, commission_cents, status,
+                                expires_at, confirmed_at)
+           VALUES ($1, $2, $3, $4, $7, $8, $9, $10, $5::text,
+                   CASE WHEN $5::text = 'held' THEN now() + make_interval(secs => $6::int) END,
+                   CASE WHEN $5::text = 'confirmed' THEN now() END)""",
+        slot_id, name, contact, seats, status, expires_in_s, discount_pct, unit_price_cents,
+        amount, (amount * 15 + 50) // 100,
     )
 
 

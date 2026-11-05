@@ -31,8 +31,8 @@ sans abonnement.
 
 | Côté | Aujourd'hui | Pas encore |
 |---|---|---|
-| **Client** (carte) | Voir les créneaux libérés autour de soi sur une carte de Paris, filtrer par secteur, prix et délai, voir la remise du moment et la suivante, mises à jour en direct | Réserver et payer (étape 3) |
-| **Commerçant** (espace pro) | Remettre un créneau en vente en 3 actions, voir l'échéancier de la remise et ce qu'il touche, suivre et annuler ses créneaux | Statistiques « créneaux sauvés / € récupérés » |
+| **Client** (carte) | Voir les créneaux libérés autour de soi sur une carte de Paris, filtrer par secteur, prix et délai, voir la remise du moment et la suivante, **réserver** (place bloquée 5 min au prix affiché, paiement simulé), mises à jour en direct | Vrai paiement (Stripe), compte client, alertes |
+| **Commerçant** (espace pro) | Remettre un créneau en vente en 3 actions, voir l'échéancier de la remise et ce qu'il touche, suivre et annuler ses créneaux, **voir les réservations en direct** et ses « créneaux sauvés » du mois | Connexion à son agenda, vrais comptes |
 
 55 commerces fictifs : coiffeurs, barbiers, instituts de beauté, onglerie (dans les quartiers),
 padel, foot à 5, tennis et squash (près des portes de Paris), avec une centaine de créneaux dans
@@ -140,8 +140,17 @@ Ouvrez ensuite :
   - **Quand** : dans les 2, 6, 24 ou 48 heures.
 - **Autour de moi** : centre la carte sur votre position et affiche les distances (le
   navigateur demande l'autorisation).
-- **Fiche commerce** (clic sur un point) : ses créneaux et le bouton « Réserver ». La
-  réservation arrive à l'étape 3 ; pour l'instant un message l'annonce.
+- **Fiche commerce** (clic sur un point) : ses créneaux et le bouton « Réserver ».
+- **Réserver** :
+  1. nom et e-mail (ou téléphone), puis « Bloquer ma place » ;
+  2. la place est **bloquée 5 minutes** au prix affiché (garanti même si la remise change
+     entre-temps) ; un compte à rebours s'affiche, et le créneau disparaît aussitôt de la carte
+     des autres clients ;
+  3. « Payer » (paiement **simulé**, aucune donnée bancaire) : réservation confirmée, avec
+     l'économie réalisée et une référence.
+
+  « Annuler » ou fermer la fenêtre rend la place tout de suite ; passé 5 minutes sans payer, elle
+  est libérée automatiquement. Si quelqu'un a réservé juste avant vous : « Plus de place ».
 - **Temps réel** (pastille verte en haut) : nouveaux créneaux, annulations et baisses de prix
   apparaissent sans recharger la page.
 - Pour voir **toutes les disponibilités** : dézoomez sur tout Paris, aucun secteur coché, prix
@@ -177,10 +186,14 @@ L'aperçu affiche l'**échéancier de la remise**, le **prix client** et **ce qu
 (après 15 % de commission) à chaque palier. « Publier le créneau » : il apparaît aussitôt dans
 « Mes créneaux » et sur la carte client.
 
-**Mes créneaux** : statut (En vente, Complet, Passé, Annulé), remise du moment, plafond,
-prochain palier, montant touché, réservations, bouton « Annuler le créneau » (refusé si une
-réservation est déjà payée). Une notification « Nouvelle réservation » s'affichera à
-l'étape 3.
+**Mes créneaux** : statut (En vente, Complet, Vendu, Passé, Annulé), remise du moment,
+plafond, prochain palier, montant touché, réservations (nom, contact, « paiement en cours » puis
+« payée », montant payé et ce que vous touchez), bouton « Annuler le créneau » (absent une fois
+une réservation payée ; une place seulement bloquée est rendue au client).
+
+**En direct** : « Un client est en train de réserver… » puis « Nouvelle réservation payée ! »,
+et sous le nom du commerce, le résultat du mois : « Ce mois-ci : 1 créneau sauvé · 26,77 €
+récupérés » (montant touché, commission déduite).
 
 Changer de commerce : « Se déconnecter », ou ouvrir un autre lien dans le même onglet.
 
@@ -189,7 +202,8 @@ Changer de commerce : « Se déconnecter », ou ouvrir un autre lien dans le mê
 ## Script de démo (2 minutes)
 
 Préparation : `python -m app.seed --reset` le jour même, serveur lancé, **deux fenêtres côte à
-côte** : la carte client et l'espace d'un commerçant (par exemple un coiffeur).
+côte** : la carte client et l'espace d'un commerçant (par exemple un barbier). Une troisième
+fenêtre client (ou un téléphone) permet de montrer qu'un créneau réservé disparaît chez les autres.
 
 1. **Le problème** (carte client) : « Près de 8 rendez-vous sur 100 sont annulés au dernier
    moment. Voici les créneaux libérés à Paris, coiffure, beauté et sport, dans une seule appli. »
@@ -200,10 +214,14 @@ côte** : la carte client et l'espace d'un commerçant (par exemple un coiffeur)
 3. **Publier** : le créneau apparaît **instantanément** sur la carte client, sans recharger.
 4. **La remise monte toute seule** : sur la carte, « Puis -30 % dès … ». « Zéro gestion pour le
    pro, il fixe seulement le plafond. »
-5. **Le modèle** : « 0 € d'abonnement, 15 % de commission uniquement si le créneau est vendu »
-   (affiché sous le bouton « Publier »).
-6. *(Étape 3, à venir)* : réservation par un client, place bloquée 5 minutes, paiement simulé,
-   le créneau disparaît des autres cartes, le commerçant voit la réservation.
+5. **Un client du quartier réserve** (carte client) : clic sur le point, « Réserver », nom et
+   e-mail, « Bloquer ma place » : compte à rebours de 5 min, prix garanti. Le créneau disparaît
+   des autres cartes ; côté pro, « Un client est en train de réserver… ».
+6. **Il paie** (simulation) : « Réservation confirmée », avec l'économie réalisée. Côté pro :
+   « Nouvelle réservation payée ! », le nom du client, ce que le pro touche, et « Ce mois-ci :
+   1 créneau sauvé · … € récupérés ».
+7. **Le modèle** : « 0 € d'abonnement, 15 % de commission uniquement si le créneau est vendu »
+   (affiché sous le bouton « Publier » et dans chaque montant touché).
 
 ---
 
@@ -227,8 +245,10 @@ de commission ; il ne paie rien si le créneau n'est pas vendu.
 | Problème | Solution |
 |---|---|
 | `seed : connexion impossible à postgresql://creno:***@127.0.0.1:5434/creno` | La base ne tourne pas : `docker start creno-db` (ou la créer, voir [Installation](#3-créer-la-base-de-données-postgresql--postgis-dans-docker)). |
-| Le serveur refuse de démarrer : « Schéma de base en version 1 » | La structure de la base a changé : arrêter le serveur, `python -m app.seed --reset`, relancer. |
+| Le serveur refuse de démarrer : « Schéma de base en version N » | La structure de la base a changé : arrêter le serveur, `python -m app.seed --reset`, relancer. |
 | Espace commerçant : « Lien invalide ou expiré » | Les liens changent à chaque `seed --reset` : prendre un lien dans le `demo-tokens.csv` actuel. |
+| Réservation : « Plus de place » | Quelqu'un a bloqué ou réservé ce créneau juste avant : en choisir un autre. |
+| Réservation : « Délai de paiement dépassé » | Plus de 5 minutes sans payer : la place a été rendue, recommencer la réservation. |
 | Aucun créneau sur la carte | Relancer `python -m app.seed --reset` (les créneaux passés disparaissent), dézoomer, vider les filtres. |
 | La carte reste grise | Le fond de carte vient d'internet (OpenFreeMap) : vérifier la connexion. |
 | La page n'a pas changé après une mise à jour du code | Recharger avec `Ctrl+Shift+R`. |
@@ -247,13 +267,14 @@ backend/
 ├── app/
 │   ├── main.py          application : démarrage, en-têtes de sécurité, fichiers statiques
 │   ├── api_public.py    API client : config, catégories, créneaux, flux temps réel
-│   ├── api_pro.py       API commerçant : profil, créneaux (publier, annuler)
+│   ├── api_pro.py       API commerçant : profil, créneaux (publier, annuler), stats
+│   ├── api_bookings.py  API réservation : bloquer une place, payer (simulé), annuler
 │   ├── jobs.py          tâches de fond : places bloquées expirées, paliers de remise
 │   ├── seed.py          données fictives de démo (Paris)
 │   ├── schema.sql       schéma de la base, calcul de la remise progressive
 │   └── config.py, db.py, security.py, broker.py
-├── static/              index.html + app.js (client), pro.html + pro.js (commerçant),
-│                        common.js, CSS, MapLibre
+├── static/              index.html + app.js + booking.js (client), pro.html + pro.js
+│                        (commerçant), common.js, CSS, MapLibre
 └── tests/               tests automatisés (pytest)
 HANDOFF.md               état détaillé, choix techniques, prochaines étapes
 CLAUDE.md                conventions et règles de sécurité du projet
@@ -277,7 +298,7 @@ Sans `TEST_DATABASE_URL`, seuls les tests qui n'ont pas besoin de base tournent.
 |---|---|---|
 | `DATABASE_URL` | `postgresql://creno:creno@127.0.0.1:5434/creno` | Base de données |
 | `COMMISSION_PCT` | `15` | Commission affichée aux pros |
-| `HOLD_SECONDS` | `300` | Durée de blocage d'une place avant paiement (étape 3) |
+| `HOLD_SECONDS` | `300` | Durée de blocage d'une place avant paiement |
 | `PUBLIC_BASE_URL` | `http://localhost:8000` | Adresse utilisée dans les liens commerçants |
 | `MAP_STYLE_URL` | style OpenFreeMap « liberty » | Fond de carte |
 | `APP_NAME` | `Last Slot` | Nom affiché |
@@ -294,8 +315,8 @@ données de démo 100 % fictives. Le détail des choix techniques est dans `HAND
 - [x] **Étape 1** : carte client, API publique, données de démo
 - [x] **Étape 2** : espace commerçant (publication, annulation, temps réel)
 - [x] Alignement sur l'executive summary : Paris, secteurs de la V1, remise progressive, commission
-- [ ] **Étape 3** : réservation (place bloquée 5 min, paiement simulé, prix figé au moment de la
-      réservation, test anti double-réservation)
+- [x] **Étape 3** : réservation (place bloquée 5 min, paiement simulé, prix figé, aucune
+      double réservation même avec 20 clients simultanés), statistiques « créneaux sauvés »
 - [ ] **Étape 4** : lancement en un seul `docker compose up`, accès sécurisé (HTTPS local, Tailscale)
-- [ ] Plus tard : statistiques pro, alertes aux clients du quartier, paiement Stripe, appli
-      mobile, connexion aux agendas des pros
+- [ ] Plus tard : alertes aux clients du quartier, paiement Stripe, appli mobile, connexion aux
+      agendas des pros

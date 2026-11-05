@@ -8,6 +8,7 @@ import {
   CATEGORY_COLORS, FALLBACK_COLOR, api, colorOf, dayLabel, debounce, distanceLabel, durationLabel,
   el, euros, fmtTime, setLive, shortWhen, startsInLabel, toast,
 } from './common.js';
+import { openBooking } from './booking.js';
 
 const PRICE_SLIDER_MAX = 150; // position max du slider = pas de limite de prix
 const MOVE_DEBOUNCE_MS = 300;
@@ -149,9 +150,11 @@ function recenter() {
   state.map.flyTo({ center: state.config.default_center, zoom: state.config.default_zoom });
 }
 
-function startBooking() {
-  // Branché à l'étape 3 (hold de 5 min puis paiement simulé).
-  toast('La réservation en ligne arrive bientôt.');
+function startBooking(slot) {
+  openBooking(slot, {
+    isEvent: state.categories.get(slot.merchant.category)?.family === 'event',
+    holdSeconds: state.config.hold_seconds,
+  });
 }
 
 /* ---------- Données ---------- */

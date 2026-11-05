@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import api_pro, api_public
+from . import api_bookings, api_pro, api_public
 from .config import settings
 from .db import apply_schema, create_pool
 from .jobs import run_jobs_loop
@@ -107,5 +107,6 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(SecurityHeadersMiddleware, csp_enabled=settings.csp_enabled)
 app.include_router(api_public.router)
 app.include_router(api_pro.router)
+app.include_router(api_bookings.router)
 # Monté en dernier : "/" capte tout ce qu'aucune route /api/* n'a servi avant lui.
 app.mount("/", RevalidatedStaticFiles(directory=STATIC_DIR, html=True), name="static")

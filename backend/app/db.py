@@ -1,13 +1,18 @@
 """Pool de connexions asyncpg, application et réinitialisation du schéma."""
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 # À incrémenter à chaque changement incompatible de schema.sql.
-# 1 : prix fixe par créneau ; 2 : remise progressive (plafond + paliers), catégories de la V1.
-SCHEMA_VERSION = 2
+# 1 : prix fixe par créneau ; 2 : remise progressive (plafond + paliers), catégories de la V1 ;
+# 3 : prix, remise et commission figés sur chaque réservation.
+SCHEMA_VERSION = 3
+
+T = TypeVar("T")
 ADVISORY_LOCK_ID = 424242
 
 # Tout ce que crée schema.sql (sauf les extensions). CASCADE : vues et contraintes dépendantes.
@@ -78,6 +83,22 @@ async def apply_schema(pool: asyncpg.Pool) -> None:
                 await conn.execute("INSERT INTO schema_version (version) VALUES ($1)", SCHEMA_VERSION)
         finally:
             await conn.execute("SELECT pg_advisory_unlock($1)", ADVISORY_LOCK_ID)
+
+
+async def retry_on_deadlock(operation: Callable[[], Awaitable[T]], attempts: int = 3) -> T:
+    """Rejoue une opération transactionnelle que PostgreSQL a abandonnée pour interblocage.
+
+    Les transactions qui verrouillent créneau puis réservations (annulation par le pro) et celles
+    qui verrouillent réservations puis créneau (expiration, annulation par le client) peuvent
+    s'interbloquer ; PostgreSQL le détecte et en abandonne une, qu'on rejoue ici.
+    """
+    for attempt in range(attempts):
+        try:
+            return await operation()
+        except asyncpg.DeadlockDetectedError:
+            if attempt == attempts - 1:
+                raise
+    raise AssertionError("inaccessible")
 
 
 async def reset_schema(pool: asyncpg.Pool) -> None:

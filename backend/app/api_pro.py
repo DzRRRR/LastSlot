@@ -15,6 +15,7 @@ from pydantic import AwareDatetime, BaseModel, Field
 
 from .api_public import Pricing
 from .broker import broker
+from .db import retry_on_deadlock
 from .security import current_merchant_id
 
 router = APIRouter(prefix="/api/pro", tags=["pro"])
@@ -22,7 +23,6 @@ router = APIRouter(prefix="/api/pro", tags=["pro"])
 MerchantId = Annotated[int, Depends(current_merchant_id)]
 
 MAX_ADVANCE = timedelta(days=14)
-DEADLOCK_RETRIES = 3
 UNPROCESSABLE = status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
@@ -60,8 +60,17 @@ class ProBooking(BaseModel):
     customer_contact: str
     seats: int
     status: str  # 'held' | 'confirmed'
+    amount_cents: int  # payé (ou à payer) par le client, prix figé à la prise de place
+    commission_cents: int  # part Last Slot ; le pro touche amount_cents - commission_cents
     expires_at: datetime | None
     created_at: datetime
+
+
+class ProStats(BaseModel):
+    """Résultat du mois en cours (heure de Paris) : l'argument « créneaux sauvés » du pitch."""
+    since: datetime
+    saved_slots: int  # réservations payées
+    recovered_cents: int  # montant touché par le pro, commission déduite
 
 
 class ProSlot(Pricing):
@@ -105,7 +114,8 @@ SELECT s.id, s.service_id, sv.name AS service_name, s.resource_id, r.name AS res
        COALESCE((
            SELECT json_agg(json_build_object(
                       'customer_name', b.customer_name, 'customer_contact', b.customer_contact,
-                      'seats', b.seats, 'status', b.status, 'expires_at', b.expires_at,
+                      'seats', b.seats, 'status', b.status, 'amount_cents', b.amount_cents,
+                      'commission_cents', b.commission_cents, 'expires_at', b.expires_at,
                       'created_at', b.created_at)
                   ORDER BY b.created_at)
            FROM booking b
@@ -142,6 +152,17 @@ WHERE r.merchant_id = $1
   )
 ORDER BY r.id
 LIMIT 1
+"""
+
+STATS_SQL = """
+SELECT date_trunc('month', now(), 'Europe/Paris') AS since,
+       count(*)::int AS saved_slots,
+       COALESCE(sum(b.amount_cents - b.commission_cents), 0)::int AS recovered_cents
+FROM booking b
+JOIN slot s ON s.id = b.slot_id
+WHERE s.merchant_id = $1
+  AND b.status = 'confirmed'
+  AND b.confirmed_at >= date_trunc('month', now(), 'Europe/Paris')
 """
 
 INSERT_SLOT_SQL = """
@@ -190,6 +211,11 @@ async def me(request: Request, merchant_id: MerchantId) -> ProMe:
 @router.get("/slots")
 async def list_slots(request: Request, merchant_id: MerchantId) -> list[ProSlot]:
     return await fetch_slots(request.app.state.pool, merchant_id)
+
+
+@router.get("/stats")
+async def stats(request: Request, merchant_id: MerchantId) -> ProStats:
+    return ProStats(**dict(await request.app.state.pool.fetchrow(STATS_SQL, merchant_id)))
 
 
 @router.post("/slots", status_code=status.HTTP_201_CREATED)
@@ -245,44 +271,45 @@ async def cancel_slot(request: Request, merchant_id: MerchantId, slot_id: int) -
     Verrous : le créneau (FOR UPDATE) bloque les nouvelles réservations, puis ses réservations
     actives (FOR UPDATE) bloquent un paiement concurrent : un confirm en cours est attendu puis
     vu comme 'confirmed' (→ 409), un confirm ultérieur ne trouve plus de hold.
-    Le job d'expiration verrouille dans l'ordre inverse (réservations puis créneau) : en cas
-    d'interblocage, PostgreSQL abandonne une des deux transactions et on rejoue.
+    Le job d'expiration et l'annulation par le client verrouillent dans l'ordre inverse
+    (réservations puis créneau) : en cas d'interblocage, PostgreSQL abandonne une des
+    transactions et on rejoue (retry_on_deadlock).
     """
     pool = request.app.state.pool
-    for attempt in range(DEADLOCK_RETRIES):
-        try:
-            async with pool.acquire() as conn, conn.transaction():
-                slot = await conn.fetchrow(
-                    "SELECT status, capacity FROM slot WHERE id = $1 AND merchant_id = $2 FOR UPDATE",
-                    slot_id, merchant_id,
-                )
-                if slot is None:  # inexistant ou appartenant à un autre commerce : même réponse
-                    raise HTTPException(status.HTTP_404_NOT_FOUND, "Créneau introuvable.")
-                if slot["status"] == "cancelled":
-                    return Response(status_code=status.HTTP_204_NO_CONTENT)  # idempotent
-                active = await conn.fetch(
-                    "SELECT status FROM booking WHERE slot_id = $1 AND status IN ('held', 'confirmed') "
-                    "FOR UPDATE",
-                    slot_id,
-                )
-                if any(row["status"] == "confirmed" for row in active):
-                    raise HTTPException(
-                        status.HTTP_409_CONFLICT,
-                        "Des réservations sont confirmées : contactez les clients avant d'annuler.",
-                    )
-                await conn.execute(
-                    "UPDATE booking SET status = 'cancelled' WHERE slot_id = $1 AND status = 'held'",
-                    slot_id,
-                )
-                # Plus aucune réservation active : toutes les places reviennent.
-                await conn.execute(
-                    "UPDATE slot SET status = 'cancelled', remaining = capacity WHERE id = $1", slot_id
-                )
-            break
-        except asyncpg.DeadlockDetectedError:
-            if attempt == DEADLOCK_RETRIES - 1:
-                raise
 
-    broker.publish("slot", {"id": slot_id, "merchant_id": merchant_id, "remaining": slot["capacity"],
-                            "status": "cancelled", "change": "cancelled"})
+    async def cancel() -> int | None:
+        """Capacité du créneau s'il vient d'être annulé, None s'il l'était déjà."""
+        async with pool.acquire() as conn, conn.transaction():
+            slot = await conn.fetchrow(
+                "SELECT status, capacity FROM slot WHERE id = $1 AND merchant_id = $2 FOR UPDATE",
+                slot_id, merchant_id,
+            )
+            if slot is None:  # inexistant ou appartenant à un autre commerce : même réponse
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Créneau introuvable.")
+            if slot["status"] == "cancelled":
+                return None  # idempotent
+            active = await conn.fetch(
+                "SELECT status FROM booking WHERE slot_id = $1 AND status IN ('held', 'confirmed') "
+                "FOR UPDATE",
+                slot_id,
+            )
+            if any(row["status"] == "confirmed" for row in active):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Des réservations sont confirmées : contactez les clients avant d'annuler.",
+                )
+            await conn.execute(
+                "UPDATE booking SET status = 'cancelled' WHERE slot_id = $1 AND status = 'held'",
+                slot_id,
+            )
+            # Plus aucune réservation active : toutes les places reviennent.
+            await conn.execute(
+                "UPDATE slot SET status = 'cancelled', remaining = capacity WHERE id = $1", slot_id
+            )
+            return slot["capacity"]
+
+    capacity = await retry_on_deadlock(cancel)
+    if capacity is not None:
+        broker.publish("slot", {"id": slot_id, "merchant_id": merchant_id, "remaining": capacity,
+                                "status": "cancelled", "change": "cancelled"})
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,4 +1,4 @@
-# Passation — état au 2026-11-05 (étapes 1 et 2 terminées, alignées sur l'executive summary)
+# Passation — état au 2026-11-05 (étapes 1, 2 et 3 terminées, alignées sur l'executive summary)
 
 ## Produit (executive summary de l'équipe, `ExecutiveSummary.pdf` dans le dossier parent)
 
@@ -18,21 +18,25 @@
    remise maximale) ; il voit l'échéancier de la remise et ce qu'il touchera.
 2. Le créneau apparaît instantanément sur la carte client (SSE), avec la remise du moment et le
    prochain palier.
-3. Un client filtre (secteur, prix max, « dans les X h »), clique le pin, réserve. *(étape 3)*
-4. La place est bloquée 5 min (hold) → « Payer » (simulé) → confirmée. *(étape 3)*
-5. Le créneau disparaît de la carte des autres en temps réel ; le commerçant voit la réservation.
-   *(étape 3)*
+3. Un client filtre (secteur, prix max, « dans les X h »), clique le pin, réserve.
+4. La place est bloquée 5 min (hold) au prix affiché → « Payer » (simulé) → confirmée.
+5. Le créneau disparaît de la carte des autres en temps réel ; le commerçant voit la réservation
+   payée, ce qu'il touche et ses « créneaux sauvés » du mois.
+
+Les 5 étapes sont vérifiées de bout en bout dans Chromium (trois navigateurs : commerçant, client
+qui réserve, client qui observe).
 
 ## Fait
 
 ### Socle
 
-- `backend/app/schema.sql` (version 2, voir `SCHEMA_VERSION` dans `db.py`) — catégories, merchant,
+- `backend/app/schema.sql` (version 3, voir `SCHEMA_VERSION` dans `db.py`) — catégories, merchant,
   service, resource, slot, booking, avec :
   - `CHECK (remaining >= 0 AND remaining <= capacity)` : garde-fou anti-surréservation.
   - Contrainte d'exclusion `slot_no_resource_overlap` (btree_gist) : un praticien ou un terrain
     ne peut pas avoir deux créneaux ouverts qui se chevauchent.
-  - `booking.id` en UUID v4 (capability non énumérable).
+  - `booking.id` en UUID v4 (capability non énumérable) ; prix unitaire, remise, montant et
+    commission figés à la prise de place, `confirmed_at` (cohérence vérifiée par des CHECK).
   - Index `merchant_location_geom_gix` sur `(location::geometry)` (filtre par viewport).
   - Créneau : `base_price_cents` (tarif figé à la publication) et `max_discount_pct` (plafond) ;
     le prix courant n'est pas stocké, il dépend de l'heure.
@@ -86,16 +90,47 @@
 - `static/common.js` — utilitaires partagés (DOM sans innerHTML, API, formats, heure de Paris,
   miroir JS des paliers `discountTiers` / `discountSchedule`, commission).
 
+### Étape 3 — Réservation sans double-booking
+
+- `app/api_bookings.py` — sans compte client : l'id de réservation est la clé (capability).
+  - `POST /api/bookings` (201) : 404 créneau inconnu, 422 validation (nom 1..80, contact 3..120,
+    1..10 places, une seule pour un rendez-vous), 409 avec la raison (plus de place, annulé, déjà
+    commencé). Décrément atomique `UPDATE slot … WHERE remaining >= $seats` (verrou de ligne +
+    EvalPlanQual) qui lit le prix courant sous le même verrou ; la réservation fige prix, remise,
+    montant et commission (15 %) ; publie `slot` change "held" et `booking` status "held".
+  - `POST /api/bookings/{id}/confirm` : paiement simulé, `UPDATE … WHERE status = 'held' AND
+    expires_at > now()` ; idempotent si déjà payée (double clic) ; 409 expirée / annulée ;
+    publie `booking` status "confirmed".
+  - `DELETE /api/bookings/{id}` : rend les places (une instruction, réservation puis créneau) ;
+    idempotent si expirée ou annulée ; 409 si payée ; publie `slot` "released" + `booking` "cancelled".
+  - `GET /api/bookings/{id}` : statut (un hold hors délai est montré `expired`), prix figé,
+    `expires_in_s` calculé par le serveur.
+- `GET /api/pro/stats` — réservations payées et montant touché (commission déduite) du mois en
+  cours, heure de Paris : « Ce mois-ci : N créneaux sauvés · X € récupérés » dans le dashboard.
+- `db.retry_on_deadlock` — rejoue une transaction abandonnée pour interblocage (annulation par le
+  pro : créneau puis réservations ; job d'expiration et annulation client : réservations puis créneau).
+- `static/booking.js` + `<dialog>` dans `index.html` — fenêtre de réservation : coordonnées →
+  place bloquée (compte à rebours fondé sur `expires_in_s`, prix figé) → « Payer (simulation) » →
+  confirmation (économie, référence). Fermer la fenêtre, ou l'onglet (`pagehide` + `keepalive`),
+  rend la place aussitôt.
+- Dashboard : toasts « Un client est en train de réserver… » puis « Nouvelle réservation payée ! »,
+  montant payé et net par réservation, statut « Vendu » sans bouton d'annulation une fois payé.
+
 ### Tests
 
-- 69 tests pytest (`backend/tests/`) : API publique (filtres, validation, prix courants et
+- 88 tests pytest (`backend/tests/`) : API publique (filtres, validation, prix courants et
   prochain palier, en-têtes), API pro (401, IDOR, attribution, chevauchements, tarif figé,
   validation, annulation, SSE), paliers SQL (bornes H-6 / H-2 incluses, exemple 30 % → 10/20/30),
-  refus d'un schéma v1, annonce temps réel d'un palier franchi, générateur SSE, seed (Paris,
-  horaires par secteur, pas de chevauchement, tokens hachés, `--reset`).
-- Vérifié dans Chromium headless (scripts hors dépôt) : parcours de démo 1-2 (publication →
-  visible côté client en ~0,4 s → annulation → retirée), padel (terrains), nom piège
-  `<img onerror=…>` affiché littéralement, aucune violation CSP, mobile.
+  refus d'un schéma ancien, annonce temps réel d'un palier franchi, générateur SSE, seed (Paris,
+  horaires par secteur, pas de chevauchement, tokens hachés, `--reset`), réservation (prix figé,
+  validation, raisons des refus, confirm idempotent, délai dépassé et place rendue par le job,
+  annulation, annulation du créneau par le pro, ids invalides, événements SSE, stats) et
+  **concurrence** : 20 clients simultanés sur un rendez-vous → exactement 1 succès ; 12 sur un
+  cours de 5 places → 5 succès ; invariant places restantes + bloquées = capacité.
+- Vérifié dans Chromium headless (scripts hors dépôt) : parcours de démo complet en 5 étapes,
+  annulation d'un hold (la place réapparaît chez les autres), conflit entre deux clients
+  (« Plus de place »), padel (terrains), nom piège `<img onerror=…>` affiché littéralement
+  (liste, popup, fenêtre de réservation), aucune violation CSP, mobile.
 
 ### Écarts par rapport au plan initial (et pourquoi)
 
@@ -120,52 +155,27 @@
    réservation payée sur un créneau annulé ; interblocage avec le job d'expiration → rejeu).
 6. **Front** : zoom initial fourni par `/api/config` ; `clusterMaxZoom: 14` (la source GeoJSON
    sert les tuiles du zoom entier inférieur) ; heures en heure de Paris ; `hashchange` écouté
-   (autre lien pro dans le même onglet) ; `[hidden] { display: none !important }` ; « Réserver »
-   affiche un toast en attendant l'étape 3 (`startBooking(slot)` dans `app.js`).
-7. **Console navigateur** : « Expected value to be of type number, but found null » et quelques
+   (autre lien pro dans le même onglet) ; `[hidden] { display: none !important }`.
+7. **Réservation** : confirm idempotent (double clic) au lieu d'un 409 ; raisons de refus
+   explicites (plus de place / annulé / déjà commencé / délai dépassé) ; prix figé à la prise de
+   place (le client paie ce qu'il a vu, même si un palier tombe pendant les 5 min) ; événements
+   `booking` porteurs du statut (held / confirmed / cancelled) pour des notifications précises ;
+   statistiques du mois ajoutées dès maintenant (elles n'ont de sens qu'avec les réservations).
+8. **Console navigateur** : « Expected value to be of type number, but found null » et quelques
    « Image … could not be loaded » viennent du style OpenFreeMap (présents sans nos couches).
 
-## Points d'attention pour l'étape 3
+## Points d'attention pour l'étape 4
 
-- **Figer le prix à la réservation** : le prix baisse avec l'heure. Le hold doit enregistrer le
-  prix payé (`price_cents` de `slot_priced` au moment du hold), la remise appliquée et la
-  commission (`COMMISSION_PCT`) dans `booking` (nouvelles colonnes → `SCHEMA_VERSION = 3`,
-  `seed --reset`). Le confirm facture le prix enregistré, pas le prix courant ; la modale client
-  affiche ce prix.
-- Publier `booking` {slot_id, merchant_id} à la création du hold et à la confirmation (le
-  dashboard affiche « Nouvelle réservation »), et `slot` avec le nouveau `remaining`.
-- Le confirm doit rester `UPDATE booking … WHERE status = 'held' AND expires_at > now()` : c'est
-  ce sur quoi repose l'exclusion avec `DELETE` et avec le job d'expiration.
-- Front client : brancher la modale sur `startBooking(slot)` dans `app.js`.
-- Infra de test réutilisable : `tests/dbutil.py` (`insert_merchant` avec token connu,
-  `insert_resource`, `insert_slot` avec plafond, `insert_booking`, `db_call`, `EVENT_CATEGORY`),
-  fixture `server` (vrai uvicorn, tâches de fond toutes les 0,2 s).
-- `HEAD /api/*` répond 404 (FastAPI ne mappe pas HEAD sur les routes GET) : utiliser GET.
+- Uvicorn en un seul worker (`--workers 1 --timeout-graceful-shutdown 2`) : le broker SSE est en
+  mémoire du processus.
+- Le schéma est versionné (v3) : une base existante d'une version antérieure doit être recréée
+  (`python -m app.seed --reset`) ; dans le conteneur, prévoir le seed avant chaque démo.
+- `HOLD_SECONDS`, `COMMISSION_PCT`, `PUBLIC_BASE_URL` (liens des commerçants derrière Traefik)
+  sont configurables par variables d'environnement.
+- Infra de test réutilisable : `tests/dbutil.py`, fixture `server` (vrai uvicorn, tâches de fond
+  toutes les 0,2 s). `HEAD /api/*` répond 404 (FastAPI ne mappe pas HEAD sur GET) : utiliser GET.
 
 ## À faire, dans l'ordre
-
-### Étape 3 — Réservation sans double-booking
-
-- `POST /api/bookings` {slot_id, customer_name 1..80, customer_contact 3..120, seats 1..10}.
-  Transaction :
-  1. `UPDATE slot SET remaining = remaining - $seats WHERE id = $1 AND status = 'open'
-     AND remaining >= $seats AND starts_at > now() RETURNING merchant_id, remaining`
-     → aucune ligne ⇒ 409 « plus de place ».
-  2. `INSERT INTO booking (..., price_cents, discount_pct, commission_cents, status, expires_at)
-     VALUES (..., <prix courant>, ..., 'held', now() + hold)`.
-  Pourquoi c'est sûr : l'UPDATE pose un verrou de ligne ; une transaction concurrente attend,
-  puis en READ COMMITTED PostgreSQL ré-évalue le WHERE sur la nouvelle version de la ligne
-  (EvalPlanQual) ⇒ `remaining >= $seats` devient faux ⇒ pas de surréservation.
-- `POST /api/bookings/{id}/confirm` (paiement simulé) :
-  `UPDATE booking SET status='confirmed', expires_at=NULL WHERE id=$1 AND status='held'
-  AND expires_at > now() RETURNING slot_id` → sinon 409 (expiré / déjà confirmé) ou 404.
-- `DELETE /api/bookings/{id}` : annule un hold et restitue les places (transaction).
-- `GET /api/bookings/{id}` : statut, prix figé.
-- Job d'expiration : **fait** (`app/jobs.py`). Confirm et expiration s'excluent mutuellement :
-  tous deux exigent `status='held'` sur la même ligne.
-- Front : modale (nom, contact, places si séance collective) → prix figé et compte à rebours →
-  « Payer (simulation) ».
-- Test de concurrence à écrire : N requêtes simultanées sur un slot de capacité 1 ⇒ exactement 1 succès.
 
 ### Étape 4 — Packaging
 
@@ -179,8 +189,6 @@
 
 ### Plus tard (hors proto)
 
-- Statistiques pro « créneaux sauvés / € récupérés ce mois » (l'argument « ≈ 625 € net par mois »
-  de l'executive summary), à partir des réservations confirmées.
 - Alertes : recherches sauvegardées + Web Push (exige HTTPS ou localhost ; iOS ≥ 16.4 seulement
   si la PWA est ajoutée à l'écran d'accueil). Appli mobile (l'executive summary parle d'« appli »).
 - Connexion aux agendas des pros (année 2), cours collectifs (famille `event`, année 2).
@@ -220,8 +228,8 @@ Démo (depuis `backend/`) :
 # → http://localhost:8000 (client) ; liens commerçants dans demo-tokens.csv
 ```
 
-Si l'API refuse de démarrer avec « Schéma de base en version 1 » : arrêter uvicorn, lancer
-`python -m app.seed --reset`, relancer uvicorn.
+Si l'API refuse de démarrer avec « Schéma de base en version N, le code attend la version 3 » :
+arrêter uvicorn, lancer `python -m app.seed --reset`, relancer uvicorn.
 
 Tests (depuis `backend/`, base **jetable** : le seed y recrée tout le schéma) :
 

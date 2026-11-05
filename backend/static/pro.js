@@ -257,25 +257,39 @@ async function publish(event) {
 async function refreshSlots() {
   if (!state.token) return;
   try {
-    state.slots = await proApi('/api/pro/slots');
+    const [slots, stats] = await Promise.all([proApi('/api/pro/slots'), proApi('/api/pro/stats')]);
+    state.slots = slots;
     renderSlots();
+    renderStats(stats);
   } catch (err) {
     handleError(err);
   }
 }
 
+/** « Créneaux sauvés » du mois : l'argument de l'executive summary, mesuré sur les ventes réelles. */
+function renderStats({ saved_slots: saved, recovered_cents: recovered }) {
+  $('pro-stats').textContent = saved === 0
+    ? 'Ce mois-ci : aucun créneau sauvé pour l\'instant'
+    : `Ce mois-ci : ${saved} créneau${saved > 1 ? 'x' : ''} sauvé${saved > 1 ? 's' : ''} · `
+      + `${euros(recovered)} récupérés`;
+}
+
 function slotState(slot) {
   if (slot.status === 'cancelled') return { label: 'Annulé', cls: 'is-cancelled', cancellable: false };
   if (new Date(slot.starts_at) <= Date.now()) return { label: 'Passé', cls: 'is-past', cancellable: false };
-  if (slot.remaining === 0) return { label: 'Complet', cls: 'is-full', cancellable: true };
-  return { label: 'En vente', cls: 'is-open', cancellable: true };
+  // Une réservation payée ne s'annule pas depuis le dashboard (l'API répondrait 409).
+  const paid = slot.bookings.some((b) => b.status === 'confirmed');
+  if (slot.remaining === 0) return { label: paid ? 'Vendu' : 'Complet', cls: 'is-full', cancellable: !paid };
+  return { label: 'En vente', cls: 'is-open', cancellable: !paid };
 }
 
 function bookingItem(booking) {
+  const net = euros(booking.amount_cents - booking.commission_cents);
   const status = booking.status === 'confirmed'
-    ? el('span', { class: 'booking-status is-confirmed' }, 'Payée')
+    ? el('span', { class: 'booking-status is-confirmed' },
+      `Payée ${euros(booking.amount_cents)} · vous touchez ${net}`)
     : el('span', { class: 'booking-status is-held' },
-      `Paiement en cours, jusqu'à ${fmtTime.format(new Date(booking.expires_at))}`);
+      `Paiement en cours (${euros(booking.amount_cents)}), jusqu'à ${fmtTime.format(new Date(booking.expires_at))}`);
   return el('li', {},
     el('strong', {}, booking.customer_name),
     ` · ${booking.customer_contact}`,
@@ -347,7 +361,9 @@ function connectStream() {
   source.addEventListener('slot', (event) => { if (isMine(event)) refresh(); }); // dont paliers de remise
   source.addEventListener('booking', (event) => {
     if (!isMine(event)) return;
-    toast('Nouvelle réservation !');
+    const { status } = JSON.parse(event.data);
+    if (status === 'held') toast('Un client est en train de réserver un de vos créneaux…');
+    else if (status === 'confirmed') toast('Nouvelle réservation payée !');
     refresh();
   });
 }
