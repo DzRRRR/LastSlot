@@ -174,7 +174,8 @@
 - `docker-compose.yml` : `postgis/postgis:16-3.4` (healthcheck `pg_isready`, volume nommé,
   DB non exposée) + api (`127.0.0.1:8000:8000`, `depends_on: condition: service_healthy`).
   Note : l'image crée l'utilisateur `POSTGRES_USER` superuser → acceptable en proto, à séparer ensuite.
-- `README.md` : lancement, reseed avant démo, liens pro, intégration Traefik (HTTPS local) / Tailscale.
+- `README.md` : **fait** pour l'équipe (installation, navigation, script de démo, remise progressive,
+  dépannage) ; à compléter avec `docker compose up` et l'intégration Traefik (HTTPS local) / Tailscale.
 
 ### Plus tard (hors proto)
 
