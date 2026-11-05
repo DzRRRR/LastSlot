@@ -16,8 +16,8 @@ sans abonnement.
 ## Sommaire
 
 1. [Ce que fait le prototype](#ce-que-fait-le-prototype)
-2. [Installation](#installation)
-3. [Lancer l'application](#lancer-lapplication)
+2. [Démarrage rapide avec Docker](#démarrage-rapide-avec-docker)
+3. [Montrer la démo sur un téléphone (HTTPS)](#montrer-la-démo-sur-un-téléphone-https)
 4. [Naviguer dans l'application](#naviguer-dans-lapplication)
 5. [Script de démo (2 minutes)](#script-de-démo-2-minutes)
 6. [La remise progressive](#la-remise-progressive)
@@ -40,87 +40,81 @@ les 36 prochaines heures.
 
 ---
 
-## Installation
+## Démarrage rapide avec Docker
 
-À faire une seule fois.
-
-### Prérequis
-
-- **Python 3.12** ou plus récent
-- **Docker** (Docker Desktop sur Windows et macOS) pour la base de données
-- **git**
-- Une connexion internet (le fond de carte vient d'OpenFreeMap)
-
-### 1. Récupérer le code
+Il faut seulement **git**, **Docker** (Docker Desktop sur Windows et macOS) et une connexion
+internet (le fond de carte vient d'OpenFreeMap). Pas besoin d'installer Python.
 
 ```bash
 git clone https://github.com/DzRRRR/LastSlot.git
 cd LastSlot
+docker compose up -d --build
 ```
 
-### 2. Installer les dépendances Python
-
-Linux / macOS :
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r backend/requirements-dev.txt
-```
-
-Windows (PowerShell) :
-
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r backend\requirements-dev.txt
-```
-
-> Si PowerShell refuse d'activer l'environnement :
-> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, puis relancer l'activation.
-
-### 3. Créer la base de données (PostgreSQL + PostGIS dans Docker)
-
-```bash
-docker run -d --name creno-db \
-  -e POSTGRES_USER=creno -e POSTGRES_PASSWORD=creno -e POSTGRES_DB=creno \
-  -p 127.0.0.1:5434:5432 -v creno-pgdata:/var/lib/postgresql/data \
-  postgis/postgis:16-3.4
-```
-
-Sous Windows (PowerShell), écrire la commande sur une seule ligne, sans les `\`.
-
-La base n'est accessible que depuis votre machine (port 5434). Après un redémarrage de
-l'ordinateur : `docker start creno-db`.
-
-> Mac à puce Apple : si Docker signale une architecture incompatible, ajouter
-> `--platform linux/amd64` après `docker run -d`.
-
----
-
-## Lancer l'application
-
-À chaque session, depuis le dossier `backend/`, avec l'environnement Python activé
-(`source .venv/bin/activate` ou `.venv\Scripts\Activate.ps1`) :
-
-```bash
-cd backend
-python -m app.seed --reset
-uvicorn app.main:app --reload --port 8000 --timeout-graceful-shutdown 2
-```
-
-- `python -m app.seed --reset` **efface tout** et recrée les données de démo. Les créneaux sont
-  calculés à partir de l'heure actuelle : **relancez-le le jour de la démo.** Il affiche les
-  liens de connexion des commerçants et les enregistre dans `backend/demo-tokens.csv`.
-- `uvicorn …` démarre le serveur. Il reste ouvert ; `Ctrl+C` pour l'arrêter.
-
-Ouvrez ensuite :
+Le premier lancement télécharge les images et construit l'application (quelques minutes).
+`docker compose ps` doit ensuite afficher `api` et `db` à l'état **healthy**. Au premier
+démarrage, l'application crée seule les données de démo.
 
 | Page | Adresse |
 |---|---|
 | Carte client | http://localhost:8000 |
-| Espace commerçant | http://localhost:8000/pro.html (avec un lien de `demo-tokens.csv`) |
+| Espace commerçant | http://localhost:8000/pro.html (avec un lien commerçant, voir ci-dessous) |
 | Documentation de l'API | http://localhost:8000/docs |
+
+**Avant chaque démo**, régénérer les données : les créneaux sont calculés à partir de l'heure
+actuelle. La commande affiche les liens de connexion des 55 commerçants.
+
+```bash
+docker compose exec api python -m app.seed --reset
+```
+
+Pour garder les liens dans un fichier (`-T` : sortie brute, sans terminal) :
+
+```bash
+docker compose exec -T api cat /tmp/demo-tokens.csv > demo-tokens.csv
+```
+
+Autres commandes utiles :
+
+| Besoin | Commande |
+|---|---|
+| Voir les logs (et les liens du premier démarrage) | `docker compose logs api` |
+| Arrêter (les données sont gardées) | `docker compose down` |
+| Tout effacer, base comprise | `docker compose down -v` |
+| Mettre à jour après un `git pull` | `docker compose up -d --build` |
+
+Réglages (port, commission, durée de blocage, mots de passe de la base) : copier `.env.example`
+en `.env` et l'adapter. Tout fonctionne sans `.env`.
+
+Sécurité : l'application n'est accessible que depuis votre ordinateur (127.0.0.1). La base n'est
+pas accessible hors de Docker. L'application tourne sans droits d'administration, sur un
+système de fichiers en lecture seule.
+
+---
+
+## Montrer la démo sur un téléphone (HTTPS)
+
+Sur un téléphone, l'application doit être servie en **HTTPS** (indispensable pour « Autour de
+moi »), sans jamais l'exposer sur Internet. Le plus simple : **Tailscale**, installé sur
+l'ordinateur et sur le téléphone, connectés au même compte.
+
+```bash
+tailscale serve --bg 8000
+```
+
+L'application est alors disponible sur `https://<nom-de-la-machine>.<tailnet>.ts.net`, pour les
+appareils de votre tailnet uniquement. Tailscale propose d'activer HTTPS au premier lancement.
+Pour que les liens commerçants utilisent cette adresse, ajouter dans `.env` :
+`PUBLIC_BASE_URL=https://<nom-de-la-machine>.<tailnet>.ts.net`, puis
+`docker compose up -d` et `docker compose exec api python -m app.seed --reset`. Pour arrêter le
+partage : `tailscale serve reset`.
+
+> N'utilisez pas `tailscale funnel` : il publierait l'application sur Internet.
+
+Variante pour un homelab avec **Traefik** : `docker-compose.traefik.yml` ajoute les labels
+nécessaires. Il faut renseigner `LASTSLOT_HOST` (et au besoin `TRAEFIK_NETWORK`,
+`TRAEFIK_ENTRYPOINT`) dans `.env`, puis :
+`docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build`.
 
 ---
 
@@ -159,8 +153,10 @@ Ouvrez ensuite :
 ### Espace commerçant — http://localhost:8000/pro.html
 
 **Se connecter.** Pas de mot de passe dans le prototype : chaque commerce fictif a un **lien
-personnel**, régénéré à chaque `seed --reset`. Les liens sont dans `backend/demo-tokens.csv` (une
-ligne par commerce : id, nom, secteur, lien). Au choix :
+personnel**, régénéré à chaque `seed --reset`. La commande de reset les affiche ; avec Docker, on
+peut aussi les récupérer dans un fichier (`docker compose exec -T api cat /tmp/demo-tokens.csv >
+demo-tokens.csv`), sans Docker ils sont dans `backend/demo-tokens.csv` (une ligne par commerce :
+id, nom, secteur, lien). Au choix :
 
 - ouvrir le lien dans le navigateur ;
 - ou aller sur la carte, cliquer « Vous êtes un pro ? Remettez un créneau en vente → », et
@@ -169,10 +165,10 @@ ligne par commerce : id, nom, secteur, lien). Au choix :
 Pour lister les liens dans un terminal (Linux / macOS) :
 
 ```bash
-column -s, -t < backend/demo-tokens.csv | less -S
+column -s, -t < demo-tokens.csv | less -S
 ```
 
-Sous Windows : ouvrir `backend\demo-tokens.csv` dans un éditeur de texte ou Excel.
+Sous Windows : ouvrir `demo-tokens.csv` dans un éditeur de texte ou Excel.
 
 **Remettre un créneau en vente**, en 3 actions :
 
@@ -201,9 +197,10 @@ Changer de commerce : « Se déconnecter », ou ouvrir un autre lien dans le mê
 
 ## Script de démo (2 minutes)
 
-Préparation : `python -m app.seed --reset` le jour même, serveur lancé, **deux fenêtres côte à
-côte** : la carte client et l'espace d'un commerçant (par exemple un barbier). Une troisième
-fenêtre client (ou un téléphone) permet de montrer qu'un créneau réservé disparaît chez les autres.
+Préparation : `docker compose exec api python -m app.seed --reset` le jour même, **deux fenêtres
+côte à côte** : la carte client et l'espace d'un commerçant (par exemple un barbier). Une troisième
+fenêtre client, ou un téléphone via [Tailscale](#montrer-la-démo-sur-un-téléphone-https), permet
+de montrer qu'un créneau réservé disparaît chez les autres.
 
 1. **Le problème** (carte client) : « Près de 8 rendez-vous sur 100 sont annulés au dernier
    moment. Voici les créneaux libérés à Paris, coiffure, beauté et sport, dans une seule appli. »
@@ -244,20 +241,51 @@ de commission ; il ne paie rien si le créneau n'est pas vendu.
 
 | Problème | Solution |
 |---|---|
-| `seed : connexion impossible à postgresql://creno:***@127.0.0.1:5434/creno` | La base ne tourne pas : `docker start creno-db` (ou la créer, voir [Installation](#3-créer-la-base-de-données-postgresql--postgis-dans-docker)). |
-| Le serveur refuse de démarrer : « Schéma de base en version N » | La structure de la base a changé : arrêter le serveur, `python -m app.seed --reset`, relancer. |
+| `docker compose ps` : `api` n'est pas *healthy* | Lire `docker compose logs api` : le message d'erreur y figure (voir les lignes suivantes). |
+| « Schéma de base en version N » (après une mise à jour) | La structure de la base a changé. Docker : `docker compose run --rm api python -m app.seed --reset` puis `docker compose up -d`. Sans Docker : arrêter le serveur, `python -m app.seed --reset`, relancer. |
+| `port is already allocated` ou `address already in use` | Un autre serveur occupe le port 8000 (par exemple uvicorn lancé à la main) : l'arrêter, ou mettre `API_PORT=8001` dans `.env` (puis http://localhost:8001). |
+| `seed : connexion impossible à postgresql://creno:***@127.0.0.1:5434/creno` (sans Docker) | La base de développement ne tourne pas : `docker start creno-db` (ou la créer, voir [Lancer sans Docker](#lancer-sans-docker-rechargement-à-chaud)). |
 | Espace commerçant : « Lien invalide ou expiré » | Les liens changent à chaque `seed --reset` : prendre un lien dans le `demo-tokens.csv` actuel. |
 | Réservation : « Plus de place » | Quelqu'un a bloqué ou réservé ce créneau juste avant : en choisir un autre. |
 | Réservation : « Délai de paiement dépassé » | Plus de 5 minutes sans payer : la place a été rendue, recommencer la réservation. |
-| Aucun créneau sur la carte | Relancer `python -m app.seed --reset` (les créneaux passés disparaissent), dézoomer, vider les filtres. |
+| Aucun créneau sur la carte | Régénérer les données (`docker compose exec api python -m app.seed --reset`) : les créneaux passés disparaissent. Dézoomer, vider les filtres. |
 | La carte reste grise | Le fond de carte vient d'internet (OpenFreeMap) : vérifier la connexion. |
 | La page n'a pas changé après une mise à jour du code | Recharger avec `Ctrl+Shift+R`. |
-| `address already in use` au lancement | Un serveur tourne déjà sur le port 8000 : l'arrêter, ou lancer avec `--port 8001`. |
 | « Autour de moi » ne fait rien | Autoriser la géolocalisation dans le navigateur. Les données couvrent Paris : ailleurs, la zone est vide (« Recentrer sur Paris »). |
 
 ---
 
 ## Pour les développeurs
+
+### Lancer sans Docker (rechargement à chaud)
+
+Pour modifier le code : l'API tourne sur la machine (Python 3.12+), la base dans un conteneur.
+À faire une fois :
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows : .venv\Scripts\Activate.ps1
+pip install -r backend/requirements-dev.txt
+docker run -d --name creno-db \
+  -e POSTGRES_USER=creno -e POSTGRES_PASSWORD=creno -e POSTGRES_DB=creno \
+  -p 127.0.0.1:5434:5432 -v creno-pgdata:/var/lib/postgresql/data \
+  postgis/postgis:16-3.4
+```
+
+Sous Windows (PowerShell), écrire la commande `docker run` sur une seule ligne, sans les `\`
+(et si l'activation est refusée : `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`). Mac à
+puce Apple : si Docker signale une architecture incompatible, ajouter `--platform linux/amd64`.
+
+À chaque session, environnement activé, depuis `backend/` (arrêter d'abord le conteneur `api`
+de Docker Compose s'il occupe le port 8000) :
+
+```bash
+cd backend
+python -m app.seed --reset         # liens commerçants dans backend/demo-tokens.csv
+uvicorn app.main:app --reload --port 8000 --timeout-graceful-shutdown 2
+```
+
+Après un redémarrage de l'ordinateur : `docker start creno-db`.
 
 **Stack** : Python 3.12+, FastAPI, asyncpg (SQL brut), PostgreSQL 16 + PostGIS ; front sans build
 (HTML + JavaScript, modules ES), carte MapLibre GL JS ; temps réel par Server-Sent Events.
@@ -276,6 +304,8 @@ backend/
 ├── static/              index.html + app.js + booking.js (client), pro.html + pro.js
 │                        (commerçant), common.js, CSS, MapLibre
 └── tests/               tests automatisés (pytest)
+docker-compose.yml       API + base PostGIS (docker-compose.traefik.yml : option HTTPS)
+backend/Dockerfile       image de l'API (Python 3.13, utilisateur non privilégié)
 HANDOFF.md               état détaillé, choix techniques, prochaines étapes
 CLAUDE.md                conventions et règles de sécurité du projet
 ```
@@ -303,6 +333,12 @@ Sans `TEST_DATABASE_URL`, seuls les tests qui n'ont pas besoin de base tournent.
 | `MAP_STYLE_URL` | style OpenFreeMap « liberty » | Fond de carte |
 | `APP_NAME` | `Last Slot` | Nom affiché |
 | `CSP_ENABLED` | `true` | En-tête de sécurité Content-Security-Policy |
+| `DEMO_TOKENS_FILE` | `demo-tokens.csv` (`/tmp/demo-tokens.csv` dans l'image) | Fichier des liens commerçants écrit par le seed |
+
+Avec Docker Compose, les variables se règlent dans `.env` (voir `.env.example`) : `API_PORT`,
+`PUBLIC_BASE_URL`, `HOLD_SECONDS`, `COMMISSION_PCT`, `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`.
+L'API s'y connecte avec un rôle PostgreSQL sans droits de superutilisateur
+(`docker/db-init/20-app-role.sh`).
 
 **Avant de pousser** : lancer les tests, et respecter les règles de `CLAUDE.md` : jamais
 d'`innerHTML` avec des données, routes `/api/pro/*` toujours filtrées par le commerce du token,
@@ -317,6 +353,7 @@ données de démo 100 % fictives. Le détail des choix techniques est dans `HAND
 - [x] Alignement sur l'executive summary : Paris, secteurs de la V1, remise progressive, commission
 - [x] **Étape 3** : réservation (place bloquée 5 min, paiement simulé, prix figé, aucune
       double réservation même avec 20 clients simultanés), statistiques « créneaux sauvés »
-- [ ] **Étape 4** : lancement en un seul `docker compose up`, accès sécurisé (HTTPS local, Tailscale)
+- [x] **Étape 4** : lancement en un seul `docker compose up`, conteneurs durcis, HTTPS pour
+      la démo sur téléphone (Tailscale, ou Traefik)
 - [ ] Plus tard : alertes aux clients du quartier, paiement Stripe, appli mobile, connexion aux
       agendas des pros

@@ -98,6 +98,7 @@ def test_seed_reports_unreachable_database_without_password() -> None:
 def test_seed_cli_recreates_schema_and_writes_tokens(seeded: dict) -> None:
     tokens_file: Path = seeded["tokens"]
     assert stat.S_IMODE(tokens_file.stat().st_mode) == 0o600
+    assert b"\r" not in tokens_file.read_bytes()  # fins de ligne Unix (cut, grep, xdg-open)
     with tokens_file.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 55
@@ -122,6 +123,21 @@ def test_seed_cli_recreates_schema_and_writes_tokens(seeded: dict) -> None:
     assert all(s["base_price_cents"] == s["service_price"] for s in slots)  # prix figé = tarif
     assert {s["max_discount_pct"] for s in slots} <= set(seed.MAX_DISCOUNTS)
     assert f"55 commerces, {len(slots)} créneaux" in seeded["stdout"]
+
+
+@requires_db
+def test_seed_if_empty_leaves_populated_database_untouched(seeded: dict, tmp_path: Path) -> None:
+    """Démarrage du conteneur : `--if-empty` ne régénère pas une base déjà peuplée."""
+    count = lambda: db_call(lambda conn: conn.fetchval("SELECT count(*) FROM merchant"))
+    before = count()
+    out = tmp_path / "tokens.csv"
+    proc = subprocess.run(
+        [sys.executable, "-m", "app.seed", "--if-empty", "--tokens-out", str(out)],
+        cwd=BACKEND_DIR, env={**os.environ, "DATABASE_URL": TEST_DATABASE_URL},
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0 and "rien à faire" in proc.stdout
+    assert not out.exists() and count() == before
 
 
 @requires_db

@@ -291,9 +291,10 @@ async def _insert(conn: asyncpg.Connection, merchants: list[MerchantPlan],
     return links
 
 
-async def seed(dsn: str, reset: bool, base_url: str,
-               now: datetime | None = None) -> tuple[list[tuple[int, str, str, str]], int]:
-    """Peuple la base ; renvoie (liens commerçants, nombre de créneaux)."""
+async def seed(dsn: str, reset: bool, base_url: str, now: datetime | None = None,
+               if_empty: bool = False) -> tuple[list[tuple[int, str, str, str]], int] | None:
+    """Peuple la base ; renvoie (liens commerçants, nombre de créneaux), ou None si `if_empty`
+    et que la base contient déjà des commerces (rien n'est modifié)."""
     merchants = build_plan(now or datetime.now(timezone.utc))
     pool = await create_pool(dsn)
     try:
@@ -304,6 +305,8 @@ async def seed(dsn: str, reset: bool, base_url: str,
         # Une seule transaction : en cas d'erreur, la base reste dans son état précédent.
         async with pool.acquire() as conn, conn.transaction():
             if await conn.fetchval("SELECT EXISTS (SELECT FROM merchant)"):
+                if if_empty:
+                    return None
                 raise SeedError("la base contient déjà des commerces : relancer avec --reset")
             codes = {r["code"] for r in await conn.fetch("SELECT code FROM category")}
             if missing := set(CATEGORIES) - codes:
@@ -319,7 +322,9 @@ def write_tokens(path: Path, links: list[tuple[int, str, str, str]]) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.fchmod(fd, 0o600)  # O_CREAT n'applique le mode qu'à la création d'un nouveau fichier
     with open(fd, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+        # Fins de ligne Unix : avec le \r\n par défaut du module csv, `cut -d, -f4` renverrait
+        # des liens terminés par \r (en-tête HTTP invalide si on en extrait le token).
+        writer = csv.writer(f, lineterminator="\n")
         writer.writerow(["id", "nom", "categorie", "lien"])
         writer.writerows(links)
 
@@ -329,23 +334,32 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m app.seed",
         description="Peuple la base avec des données fictives de démonstration (Paris).",
     )
-    parser.add_argument("--reset", action="store_true",
-                        help="supprime et recrée tout le schéma (données comprises) avant")
-    parser.add_argument("--tokens-out", type=Path, default=Path("demo-tokens.csv"),
-                        help="CSV des liens commerçants (défaut : ./demo-tokens.csv)")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--reset", action="store_true",
+                      help="supprime et recrée tout le schéma (données comprises) avant")
+    mode.add_argument("--if-empty", action="store_true",
+                      help="ne fait rien si la base contient déjà des commerces (démarrage Docker)")
+    parser.add_argument("--tokens-out", type=Path,
+                        default=Path(os.getenv("DEMO_TOKENS_FILE", "demo-tokens.csv")),
+                        help="CSV des liens commerçants (défaut : $DEMO_TOKENS_FILE "
+                             "ou ./demo-tokens.csv)")
     parser.add_argument("--base-url", default=settings.public_base_url,
                         help="URL de l'app dans les liens (défaut : $PUBLIC_BASE_URL "
                              "ou http://localhost:8000)")
     args = parser.parse_args(argv)
 
     try:
-        links, n_slots = asyncio.run(
-            seed(settings.database_url, args.reset, args.base_url.rstrip("/"))
-        )
+        result = asyncio.run(seed(settings.database_url, args.reset, args.base_url.rstrip("/"),
+                                  if_empty=args.if_empty))
     except (SeedError, DatabaseUnavailableError) as exc:
         print(f"seed : {exc}", file=sys.stderr)
         return 1
+    if result is None:
+        print("seed : la base contient déjà des données de démo, rien à faire "
+              "(--reset pour les régénérer).")
+        return 0
 
+    links, n_slots = result
     for merchant_id, name, category, link in links:
         print(f"{merchant_id:>3}  {category:<10}  {name:<28}  {link}")
     write_tokens(args.tokens_out, links)

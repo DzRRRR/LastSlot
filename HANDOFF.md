@@ -1,4 +1,4 @@
-# Passation — état au 2026-11-05 (étapes 1, 2 et 3 terminées, alignées sur l'executive summary)
+# Passation — état au 2026-11-05 (étapes 1 à 4 terminées, alignées sur l'executive summary)
 
 ## Produit (executive summary de l'équipe, `ExecutiveSummary.pdf` dans le dossier parent)
 
@@ -116,9 +116,41 @@ qui réserve, client qui observe).
 - Dashboard : toasts « Un client est en train de réserver… » puis « Nouvelle réservation payée ! »,
   montant payé et net par réservation, statut « Vendu » sans bouton d'annulation une fois payé.
 
+### Étape 4 — Packaging
+
+- `backend/Dockerfile` — `python:3.13-slim`, dépendances en couche séparée, code et front
+  appartenant à root, utilisateur `lastslot` (uid 10001) sans shell, `HEALTHCHECK` en Python
+  (pas de curl dans l'image), `CMD` : `python -m app.seed --if-empty && exec uvicorn …
+  --workers 1 --timeout-graceful-shutdown 2` (uvicorn PID 1, reçoit SIGTERM). `.dockerignore` :
+  ni tests, ni caches, ni `demo-tokens.csv`.
+- `docker-compose.yml` (projet `lastslot`) — `db` : `postgis/postgis:16-3.4`, volume nommé,
+  healthcheck `pg_isready -h 127.0.0.1` (le TCP ne répond qu'après l'initialisation), aucun port
+  publié ; `api` : `127.0.0.1:${API_PORT:-8000}:8000`, `depends_on: service_healthy`,
+  `read_only` + tmpfs `/tmp`, `cap_drop: ALL`, `no-new-privileges`.
+- `docker/db-init/20-app-role.sh` — à l'initialisation du volume : rôle `lastslot_app` sans
+  privilège de superutilisateur, propriétaire de la base (PostGIS installé par le superutilisateur
+  `lastslot_admin` via le script de l'image ; btree_gist est « trusted »). Mot de passe passé par
+  variable psql (`:'app_password'`), aucune interpolation shell.
+- `docker-compose.traefik.yml` — option HTTPS derrière un Traefik existant (labels, réseau externe,
+  `LASTSLOT_HOST` obligatoire). `.env.example` — toutes les variables, valeurs par défaut.
+- Seed : `--if-empty` (premier démarrage du conteneur, puis plus rien), `DEMO_TOKENS_FILE`
+  (`/tmp/demo-tokens.csv` dans l'image, seul dossier inscriptible), CSV en fins de ligne Unix.
+- README : démarrage en une commande, reseed avant démo, récupération des liens
+  (`docker compose exec -T api cat /tmp/demo-tokens.csv`), démo sur téléphone via
+  `tailscale serve --bg 8000` (HTTPS limité au tailnet ; jamais `funnel`).
+- **Validé sans Docker** (le sandbox de Claude Code n'a pas accès au démon) :
+  `docker compose config` (base, port surchargé, surcouche Traefik avec et sans `LASTSLOT_HOST`) ;
+  script d'init sur un PostgreSQL 16 neuf en scram, avec un mot de passe contenant une
+  apostrophe ; `CMD` de l'image rejoué depuis une copie du code en lecture seule, connecté avec
+  le rôle non superutilisateur : seed au premier démarrage, `--if-empty` au redémarrage, sonde
+  de santé, réservation, connexion pro, `seed --reset` API en marche, aucune écriture dans le
+  code, arrêt en ~2 s avec un flux SSE ouvert, `COPY … TO PROGRAM` refusé au rôle ; suite de
+  tests sous Python 3.13 (version de l'image). **Reste à valider : un vrai `docker compose up
+  --build`.**
+
 ### Tests
 
-- 88 tests pytest (`backend/tests/`) : API publique (filtres, validation, prix courants et
+- 89 tests pytest (`backend/tests/`) : API publique (filtres, validation, prix courants et
   prochain palier, en-têtes), API pro (401, IDOR, attribution, chevauchements, tarif figé,
   validation, annulation, SSE), paliers SQL (bornes H-6 / H-2 incluses, exemple 30 % → 10/20/30),
   refus d'un schéma ancien, annonce temps réel d'un palier franchi, générateur SSE, seed (Paris,
@@ -156,36 +188,30 @@ qui réserve, client qui observe).
 6. **Front** : zoom initial fourni par `/api/config` ; `clusterMaxZoom: 14` (la source GeoJSON
    sert les tuiles du zoom entier inférieur) ; heures en heure de Paris ; `hashchange` écouté
    (autre lien pro dans le même onglet) ; `[hidden] { display: none !important }`.
-7. **Réservation** : confirm idempotent (double clic) au lieu d'un 409 ; raisons de refus
+7. **Packaging** : rôle PostgreSQL de l'API séparé dès maintenant (le plan le reportait) ;
+   conteneur en lecture seule sans capabilities ; seed automatique au premier démarrage
+   (`--if-empty`) pour un `docker compose up` directement utilisable ; HTTPS pour la démo via
+   Tailscale (aucune configuration) plutôt qu'un Traefik imposé, proposé en option.
+8. **Réservation** : confirm idempotent (double clic) au lieu d'un 409 ; raisons de refus
    explicites (plus de place / annulé / déjà commencé / délai dépassé) ; prix figé à la prise de
    place (le client paie ce qu'il a vu, même si un palier tombe pendant les 5 min) ; événements
    `booking` porteurs du statut (held / confirmed / cancelled) pour des notifications précises ;
    statistiques du mois ajoutées dès maintenant (elles n'ont de sens qu'avec les réservations).
-8. **Console navigateur** : « Expected value to be of type number, but found null » et quelques
+9. **Console navigateur** : « Expected value to be of type number, but found null » et quelques
    « Image … could not be loaded » viennent du style OpenFreeMap (présents sans nos couches).
 
-## Points d'attention pour l'étape 4
+## Points d'attention pour la suite
 
-- Uvicorn en un seul worker (`--workers 1 --timeout-graceful-shutdown 2`) : le broker SSE est en
-  mémoire du processus.
-- Le schéma est versionné (v3) : une base existante d'une version antérieure doit être recréée
-  (`python -m app.seed --reset`) ; dans le conteneur, prévoir le seed avant chaque démo.
-- `HOLD_SECONDS`, `COMMISSION_PCT`, `PUBLIC_BASE_URL` (liens des commerçants derrière Traefik)
-  sont configurables par variables d'environnement.
+- Uvicorn en un seul worker : le broker SSE est en mémoire du processus. Plusieurs instances
+  exigeraient LISTEN/NOTIFY ou Redis (voir « Plus tard »).
+- Schéma versionné (v3), sans migrations : un changement incompatible incrémente
+  `SCHEMA_VERSION` et impose `seed --reset` (avec Docker :
+  `docker compose run --rm api python -m app.seed --reset`).
+- Les mots de passe de `.env` ne sont lus qu'à la création du volume `pgdata`.
 - Infra de test réutilisable : `tests/dbutil.py`, fixture `server` (vrai uvicorn, tâches de fond
   toutes les 0,2 s). `HEAD /api/*` répond 404 (FastAPI ne mappe pas HEAD sur GET) : utiliser GET.
 
-## À faire, dans l'ordre
-
-### Étape 4 — Packaging
-
-- `backend/Dockerfile` (python:3.13-slim, user non-root,
-  `uvicorn app.main:app --workers 1 --timeout-graceful-shutdown 2`).
-- `docker-compose.yml` : `postgis/postgis:16-3.4` (healthcheck `pg_isready`, volume nommé,
-  DB non exposée) + api (`127.0.0.1:8000:8000`, `depends_on: condition: service_healthy`).
-  Note : l'image crée l'utilisateur `POSTGRES_USER` superuser → acceptable en proto, à séparer ensuite.
-- `README.md` : **fait** pour l'équipe (installation, navigation, script de démo, remise progressive,
-  dépannage) ; à compléter avec `docker compose up` et l'intégration Traefik (HTTPS local) / Tailscale.
+## À faire
 
 ### Plus tard (hors proto)
 
@@ -195,6 +221,16 @@ qui réserve, client qui observe).
 - Stripe test mode (PaymentIntent + webhook via `stripe listen --forward-to localhost:8000/...`),
   commission de 7,5 % pendant 3 mois pour les premiers pros.
 - Broker multi-instances (LISTEN/NOTIFY), Alembic, comptes commerçants réels, tuiles PMTiles locales.
+
+## Lancer avec Docker (démo, équipe)
+
+```bash
+docker compose up -d --build                         # API + base, données de démo au 1er démarrage
+docker compose exec api python -m app.seed --reset   # avant chaque démo (affiche les liens pro)
+docker compose down                                  # arrêt (données gardées) ; -v pour tout effacer
+```
+
+→ http://localhost:8000. Détails, HTTPS et dépannage : README.
 
 ## Lancer en local (API hors Docker, pour dev)
 

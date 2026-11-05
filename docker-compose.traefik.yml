@@ -1,0 +1,26 @@
+# Option : servir Last Slot en HTTPS derrière un Traefik existant (homelab), sur le réseau local
+# ou le tailnet uniquement, jamais sur Internet.
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
+# Suppose un Traefik v2 ou v3 branché sur le réseau Docker externe $TRAEFIK_NETWORK, avec un
+# point d'entrée HTTPS $TRAEFIK_ENTRYPOINT et un certificat valable pour $LASTSLOT_HOST.
+# Les flux temps réel (SSE) passent tels quels : Traefik ne tamponne pas les réponses.
+services:
+  api:
+    environment:
+      # Les liens commerçants du seed pointent vers l'adresse HTTPS.
+      PUBLIC_BASE_URL: https://${LASTSLOT_HOST:?définir LASTSLOT_HOST dans .env}
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.lastslot.rule: Host(`${LASTSLOT_HOST}`)
+      traefik.http.routers.lastslot.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.lastslot.tls: "true"
+      traefik.http.services.lastslot.loadbalancer.server.port: "8000"
+    networks:
+      - default
+      - traefik
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}

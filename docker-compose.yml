@@ -1,0 +1,59 @@
+# Last Slot : API + base PostgreSQL/PostGIS, en une commande (voir README, « Démarrage rapide ») :
+#   docker compose up -d --build
+# Toutes les variables ont un défaut ; les surcharger dans un fichier .env (voir .env.example).
+name: lastslot
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: lastslot
+      # Superutilisateur : ne sert qu'à l'initialisation (PostGIS, rôle de l'API).
+      POSTGRES_USER: lastslot_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lastslotadmindev}
+      # Mot de passe du rôle de l'API, créé par docker/db-init/20-app-role.sh.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-lastslotappdev}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Fichier monté seul : monter le dossier masquerait le script PostGIS de l'image.
+      - ./docker/db-init/20-app-role.sh:/docker-entrypoint-initdb.d/20-app-role.sh:ro
+    healthcheck:
+      # -h 127.0.0.1 : pendant l'initialisation, le serveur temporaire n'écoute que sur le
+      # socket Unix ; le TCP ne répond qu'une fois la base définitivement prête.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "lastslot_admin", "-d", "lastslot"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    # Aucun port publié : la base n'est joignable que par l'API, sur le réseau interne de compose.
+
+  api:
+    build: ./backend
+    environment:
+      # Rôle sans privilège de superutilisateur, propriétaire de la base.
+      DATABASE_URL: postgresql://lastslot_app:${APP_DB_PASSWORD:-lastslotappdev}@db:5432/lastslot
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:${API_PORT:-8000}}
+      HOLD_SECONDS: ${HOLD_SECONDS:-300}
+      COMMISSION_PCT: ${COMMISSION_PCT:-15}
+    ports:
+      # Publié sur la boucle locale uniquement : jamais exposé au réseau.
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    # Durcissement : système de fichiers en lecture seule (sauf /tmp), aucune capability Linux,
+    # pas d'élévation de privilèges possible.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:

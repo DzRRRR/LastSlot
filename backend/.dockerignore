@@ -1,0 +1,11 @@
+# Contexte de build minimal : ni secrets (liens de démo), ni caches, ni tests.
+**/__pycache__
+**/*.pyc
+.pytest_cache
+tests
+pytest.ini
+requirements-dev.txt
+demo-tokens.csv
+.env
+.claude
+**/.cc-writes
