@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Last Slot Pro — tableau de bord commerçant</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/pro.css">
+  <!-- Module différé, aucun script inline (CSP script-src 'self'). -->
+  <script type="module" src="/pro.js"></script>
+</head>
+<body class="pro">
+  <div class="demo-banner" role="note">Données fictives de démonstration — aucun commerce réel</div>
+
+  <section id="login-view" class="pro-login" hidden>
+    <div class="card">
+      <h1 class="logo" aria-label="Last Slot Pro">
+        <span class="logo-last">Last</span><span class="logo-slot">Slot</span> <span class="pro-tag">Pro</span>
+      </h1>
+      <p class="muted">Un client annule ? Remettez le créneau en vente en 10 secondes.</p>
+      <form id="login-form">
+        <label class="field" for="token-input">
+          <span class="field-label">Lien de connexion ou token</span>
+          <input id="token-input" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="http://localhost:8000/pro.html#t=…">
+        </label>
+        <p class="form-error" id="login-error" role="alert" hidden></p>
+        <button type="submit" class="btn-primary">Se connecter</button>
+      </form>
+      <p class="hint login-hint">
+        Démo : chaque commerce fictif a un lien personnel, généré par <code>python -m app.seed</code>
+        dans <code>backend/demo-tokens.csv</code>. Collez le lien complet ou seulement le token
+        (ce qui suit <code>#t=</code>).
+      </p>
+    </div>
+  </section>
+
+  <div id="dashboard" hidden>
+    <header class="pro-header">
+      <div class="pro-identity">
+        <span class="logo logo-small" aria-label="Last Slot Pro">
+          <span class="logo-last">Last</span><span class="logo-slot">Slot</span> <span class="pro-tag">Pro</span>
+        </span>
+        <div>
+          <h1 class="pro-title"><span class="dot" id="merchant-dot"></span><span id="merchant-name"></span></h1>
+          <p class="muted pro-meta" id="merchant-meta"></p>
+        </div>
+      </div>
+      <div class="pro-actions">
+        <span class="live" id="live-status" data-on="false">Connexion…</span>
+        <a class="btn-secondary" href="/" target="_blank" rel="noopener">Voir la carte client</a>
+        <button type="button" class="btn-secondary" id="logout-btn">Se déconnecter</button>
+      </div>
+    </header>
+
+    <main class="pro-grid">
+      <section class="card" aria-labelledby="publish-title">
+        <h2 id="publish-title">Remettre un créneau en vente</h2>
+        <form id="slot-form" novalidate>
+          <label class="field" for="service-select">
+            <span class="field-label"><b>1</b> Prestation</span>
+            <select id="service-select"></select>
+          </label>
+
+          <fieldset class="field">
+            <legend class="field-label"><b>2</b> Début</legend>
+            <div class="chips" id="quick-starts"></div>
+            <div class="row">
+              <input type="date" id="start-date" aria-label="Date">
+              <input type="time" id="start-time" step="900" aria-label="Heure">
+            </div>
+          </fieldset>
+
+          <label class="field" for="resource-select" id="resource-field">
+            <span class="field-label" id="resource-label">Praticien</span>
+            <select id="resource-select"></select>
+          </label>
+
+          <label class="field" for="capacity-input" id="capacity-field" hidden>
+            <span class="field-label">Places libérées</span>
+            <input type="number" id="capacity-input" min="1" max="500" step="1" value="2">
+          </label>
+
+          <fieldset class="field">
+            <legend class="field-label"><b>3</b> Remise maximale</legend>
+            <div class="chips" id="quick-discounts"></div>
+            <div class="row">
+              <input type="number" id="discount-input" min="5" max="80" step="1" value="30"
+                     aria-label="Remise maximale en pourcentage">
+              <span>% au plus</span>
+            </div>
+            <p class="hint">La remise monte toute seule à l'approche du rendez-vous, jusqu'à ce plafond.</p>
+          </fieldset>
+
+          <div class="preview" id="price-preview" aria-live="polite"></div>
+          <button type="submit" class="btn-primary" id="publish-btn">Publier le créneau</button>
+          <p class="hint center" id="commission-note"></p>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="slots-title">
+        <h2 id="slots-title">Mes créneaux <span class="muted" id="slots-count"></span></h2>
+        <ul class="pro-slots" id="pro-slots"></ul>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Last Slot — créneaux libérés près de chez vous</title>
+  <link rel="stylesheet" href="/vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="/style.css">
+  <!-- Différés (un module l'est par défaut) : exécutés dans l'ordre, après le parsing.
+       Aucun script inline (CSP script-src 'self'). -->
+  <script src="/vendor/maplibre-gl.js" defer></script>
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="demo-banner" role="note">Données fictives de démonstration — aucun commerce réel</div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <header class="brand">
+        <div class="brand-row">
+          <h1 class="logo" aria-label="Last Slot"><span class="logo-last">Last</span><span class="logo-slot">Slot</span></h1>
+          <span class="live" id="live-status" data-on="false">Connexion…</span>
+        </div>
+        <p class="tagline">Une annulation, une opportunité.</p>
+        <a class="pro-link" href="/pro.html">Vous êtes un pro ? Remettez un créneau en vente →</a>
+      </header>
+
+      <section class="filters" aria-label="Filtres">
+        <div class="chips" id="category-chips" role="group" aria-label="Catégories"></div>
+
+        <div class="filter-row">
+          <label class="field" for="max-price">
+            <span class="field-label">Prix max : <output id="price-output" for="max-price">tous les prix</output></span>
+            <input type="range" id="max-price" min="5" max="150" step="5" value="150">
+          </label>
+          <label class="field field-select" for="within-hours">
+            <span class="field-label">Quand</span>
+            <select id="within-hours">
+              <option value="2">Dans les 2 h</option>
+              <option value="6">Dans les 6 h</option>
+              <option value="24">Dans les 24 h</option>
+              <option value="48" selected>Dans les 48 h</option>
+            </select>
+          </label>
+        </div>
+
+        <button type="button" id="locate-btn" class="btn-secondary">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" fill="currentColor"/>
+            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/>
+          </svg>
+          Autour de moi
+        </button>
+      </section>
+
+      <div class="results-header" id="results-count" aria-live="polite">Chargement…</div>
+      <ul class="slot-list" id="slot-list"></ul>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map" role="region" aria-label="Carte des créneaux"></div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

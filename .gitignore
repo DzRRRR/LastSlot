@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+# Liens de connexion des commerçants de démo (secrets), régénérés par `python -m app.seed`.
+demo-tokens.csv
+# Dossiers internes de Claude Code.
+.cc-writes/
